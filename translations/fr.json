@@ -1,0 +1,8 @@
+{
+  "config": {
+    "name": "Nom du device",
+    "port": "Port de connexion"
+
+  }
+
+}

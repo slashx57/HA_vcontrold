@@ -1,0 +1,13 @@
+{
+  "component": {
+    "sensor": {
+      "state": {
+        "_": {
+          "off": "Inactif",
+          "on": "Actif"
+        }
+      }
+    }
+  }
+}
+

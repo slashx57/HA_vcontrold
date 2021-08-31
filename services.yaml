@@ -1,0 +1,21 @@
+set_vc_mode:
+  name: Set vc mode
+  description: Set a VC mode.
+  target:
+    entity:
+      integration: vcontrold
+      domain: climate
+  fields:
+    vc_mode:
+      name: Vcontrold Mode
+      description: VC mode.
+      required: true
+      selector:
+        select:
+          options:
+            - 'ww'
+            - 'forcedNormal'
+            - 'forcedReduced'
+            - 'heating'
+            - 'standby'
+
