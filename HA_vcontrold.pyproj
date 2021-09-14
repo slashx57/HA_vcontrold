@@ -19,6 +19,7 @@
     <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="binary_sensor.py" />
     <Compile Include="climate.py">
       <SubType>Code</SubType>
     </Compile>
@@ -33,10 +34,16 @@
     <Content Include="services.yaml">
       <SubType>Code</SubType>
     </Content>
+    <Content Include="translations\climate.fr.json">
+      <SubType>Code</SubType>
+    </Content>
     <Content Include="translations\fr.json">
       <SubType>Code</SubType>
     </Content>
     <Content Include="translations\sensor.fr.json">
+      <SubType>Code</SubType>
+    </Content>
+    <Content Include="translations\water_heater.fr.json">
       <SubType>Code</SubType>
     </Content>
   </ItemGroup>

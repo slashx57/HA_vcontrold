@@ -5,6 +5,7 @@ import logging
 
 from homeassistant.components.water_heater import (
     SUPPORT_TARGET_TEMPERATURE,
+    SUPPORT_OPERATION_MODE,
     WaterHeaterEntity,
 )
 from homeassistant.const import (
@@ -19,11 +20,20 @@ from . import DOMAIN as VC_DOMAIN, VC_API, VC_HEATING_TYPE, VC_NAME
 
 _LOGGER = logging.getLogger(__name__)
 
-VC_MODE_WW = "WW"
-#VC_MODE_DHWANDHEATING = "dhwAndHeating"
-#VC_MODE_FORCEDREDUCED = "forcedReduced"
-#VC_MODE_FORCEDNORMAL = "forcedNormal"
-VC_MODE_OFF = "standby"
+VC_MODE_DHW = "WW"                                        # "Warm-Water"
+#VC_MODE_HEATING = "Heating"
+VC_MODE_DHWANDHEATING = "H+WW"                            # "Heating and Warm-Water"
+#VC_MODE_DHWANDHEATINGCOOLING = "water & Heating/Cooling"
+VC_MODE_FORCEDREDUCED = "RED"                             # "Reduced"
+VC_MODE_FORCEDNORMAL = "NORM"                             # "Normal"
+VC_MODE_OFF = "ABSCHALT"                                  # "Shut down"
+
+VC_GET_CURRENT_TEMP = "getTempWWist"                      # "getWarmwaterTcurrent"
+VC_GET_TARGET_TEMP = "getTempWWsoll"                      # "getWarmwaterTtarget"
+VC_GET_MODE = "getBetriebArtM1"                           # "getOpModeM1_vito"
+
+VC_SET_MODE = "setBetriebArtM1"                           # "setOpModeA1M1"
+VC_SET_TARGET_TEMP = "setTempWWsoll"                      # "setWarmwaterTtarget"
 
 VC_TEMP_WATER_MIN = 10
 VC_TEMP_WATER_MAX = 60
@@ -31,7 +41,7 @@ VC_TEMP_WATER_MAX = 60
 #OPERATION_MODE_ON = "on"
 #OPERATION_MODE_OFF = "off"
 
-SUPPORT_FLAGS_HEATER = SUPPORT_TARGET_TEMPERATURE
+SUPPORT_FLAGS_HEATER = SUPPORT_TARGET_TEMPERATURE | SUPPORT_OPERATION_MODE
 
 #VC_TO_HA_HVAC_DHW = {
 #    VC_MODE_WW: OPERATION_MODE_ON,
@@ -46,8 +56,7 @@ SUPPORT_FLAGS_HEATER = SUPPORT_TARGET_TEMPERATURE
 #    OPERATION_MODE_ON: VC_MODE_WW,
 #}
 
-async def async_setup_platform(
-    hass, config, async_add_entities, discovery_info=None):
+def setup_platform(hass, config, add_entities, discovery_info=None):
     """Create the VC water_heater devices."""
 
     if discovery_info is None:
@@ -57,10 +66,10 @@ async def async_setup_platform(
 
     vc_api = hass.data[VC_DOMAIN][VC_API]
     heating_type = hass.data[VC_DOMAIN][VC_HEATING_TYPE]
-    async_add_entities(
+    add_entities(
         [
             VCWater(
-                f"{hass.data[VC_DOMAIN][VC_NAME]} Water",
+                f"{hass.data[VC_DOMAIN][VC_NAME]} Water Heater",
                 vc_api,
                 heating_type,
             )
@@ -86,14 +95,14 @@ class VCWater(WaterHeaterEntity):
         """Let HA know there has been an update from the API."""
         try:
               self._current_temperature = (
-                  self._api.readfloat("getTempWWist")
+                  self._api.readfloat(VC_GET_CURRENT_TEMP)
               )
 
               self._target_temperature = (
-                  self._api.readfloat("getTempWWsoll")
+                  self._api.readfloat(VC_GET_TARGET_TEMP)
               )
 
-              if VC_MODE_WW in self._api.read("getBetriebArt"):
+              if VC_MODE_DHW in self._api.read(VC_GET_MODE):
                 self._current_mode = STATE_ON
               else:
                 self._current_mode = STATE_OFF
@@ -130,10 +139,11 @@ class VCWater(WaterHeaterEntity):
 
     def set_temperature(self, **kwargs):
         """Set new target temperatures."""
-        temp = kwargs.get(ATTR_TEMPERATURE)
+        temp = int(kwargs.get(ATTR_TEMPERATURE))
         if temp is not None:
-            #self._api.setDomesticHotWaterTemperature(temp)
-            self._target_temperature = temp
+            self._api.write(VC_SET_TARGET_TEMP, str(temp))
+            _LOGGER.debug("Setting target temp to %i", temp)
+            self._target_temperature = float(temp)
 
     @property
     def min_temp(self):
@@ -154,6 +164,20 @@ class VCWater(WaterHeaterEntity):
     def current_operation(self):
         """Return current operation ie. heat, cool, idle."""
         return self._current_mode
+
+    def set_operation_mode(self, op_mode):
+        act_mode = self._api.read(VC_GET_MODE)
+        vc_mode = None
+        if (op_mode == STATE_ON):
+          if act_mode != VC_MODE_DHWANDHEATING:
+            vc_mode = VC_MODE_DHW;
+        else:
+          vc_mode = VC_MODE_OFF;
+        if vc_mode is None:
+          return
+        _LOGGER.debug("Setting water mode to %s / %s", op_mode, vc_mode)
+        self._api.write(VC_SET_MODE, vc_mode)
+        self._current_mode = op_mode
 
     @property
     def operation_list(self):

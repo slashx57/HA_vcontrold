@@ -1,6 +1,6 @@
 {
   "domain": "vcontrold",
-  "name": "VControld Sensor",
+  "name": "VControld",
   "documentation": "",
   "dependencies": [],
   "codeowners": ["slashx57"],

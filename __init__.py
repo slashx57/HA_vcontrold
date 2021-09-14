@@ -15,6 +15,7 @@ import voluptuous as vol
 from homeassistant.const import (
     CONF_CLIENT_ID,
     CONF_NAME,
+    CONF_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL
 )
@@ -23,8 +24,7 @@ import homeassistant.helpers.config_validation as cv
 
 _LOGGER = logging.getLogger(__name__)
 
-#PLATFORMS = ["climate", "sensor", "binary_sensor", "water_heater"]
-PLATFORMS = ["climate", "sensor", "water_heater"]
+PLATFORMS = ["climate", "sensor", "binary_sensor", "water_heater"]
 
 DOMAIN = "vcontrold"
 VC_API = "api"
@@ -33,6 +33,7 @@ VC_HEATING_TYPE = "heating_type"
 
 CONF_HEATING_TYPE = "heating_type"
 DEFAULT_HEATING_TYPE = "generic"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 3002
 
 class HeatingType(enum.Enum):
@@ -48,6 +49,7 @@ CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema(
             {
+                vol.Required(CONF_HOST, default=DEFAULT_HOST): cv.string,
                 vol.Required(CONF_PORT, default=DEFAULT_PORT): cv.port,
                 vol.Optional(CONF_NAME, default="Vitodens"): cv.string,
                 vol.Optional(CONF_SCAN_INTERVAL, default=60): vol.All(
@@ -62,25 +64,29 @@ CONFIG_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
+VC_GET_INVENTORYID = "getInventory"
+
 class Device:
     """This class connects to VControld"""
 
-    def __init__(self, port):
+    def __init__(self, host, port):
       """Init function"""
       self.mutex = Lock()
+      self._host = host
       self._port = port
+      self._inventory = None
       self.tn = None
+      self._prompt = "vctrld>"
 
     def connect(self):
         global tn
         retry=3
         while retry!=0:
             try:
-               _LOGGER.info("Connecting to 127.0.0.1:" + str(self._port))
-               self.tn = telnetlib.Telnet('127.0.0.1', self._port)
+               _LOGGER.info("Connecting to " + self._host + ":" + str(self._port))
+               self.tn = telnetlib.Telnet(self._host, self._port)
                _LOGGER.info("Connected")
-               #self.tn.read_until(b"vctrld>", 5)
-               #print("Get prompt")
+               self.tn.read_until(self._prompt.encode(), 1)
                return
             except:
                #print("Connection ERROR " , sys.exc_info()[0])
@@ -89,33 +95,99 @@ class Device:
                retry-=1
         if retry==0:
             _LOGGER.warn("Failed to connect to port "+str(self._port))
+            tn.close()
             raise ConnectionError
 
     def read(self, key):
       with self.mutex:
-        _LOGGER.info("Read " + key)
-        if self.tn is None:
-          self.connect()
-        if self.tn is None:
-          return 0
-        value=""
-        #print("wait prompt")
-        self.tn.read_until(b"vctrld>", 1)
-        #print("send command :"+key)
-        self.tn.write(bytes(key, 'ascii') + b"\r\n")
-        #print("wait return")
-        value=self.tn.read_until(b"\n", 1).decode().strip("\n")
-        val = value.split(' ', 1)[0]
-#        if re.match('(\d+).(\d+)', val) is not None:
-#            val = str(round(float(val),1))
-        _LOGGER.info(str(datetime.now().time()) + " read:"+key + " val:"+val)
-        return val
+        #_LOGGER.info("Read [" + key + "]")
+        retry = 3
+        value = ""
+        while retry!=0:
+          if self.tn is None:
+            self.connect()
+          if self.tn is None:
+            _LOGGER.warn("Failed to reconnect during read, cancel")
+            return ""
+          try:
+            #ru = self.tn.read_until(self._prompt.encode(), 1)
+            #_LOGGER.debug("Read1 ["+ru.decode()+"]")
+            self.tn.write(key.encode() + b"\r\n")
+            value=self.tn.read_until(self._prompt.encode(), 1).decode().strip("\n"+self._prompt)
+            #_LOGGER.debug("Read2 ["+value+"]")
+            if value != "":
+              break;
+          except:
+            _LOGGER.warn("Failed to read, retry")
+          retry-=1
+        if retry==0:
+          _LOGGER.warn("Failed to read "+key+", cancel")
+          self.tn.close()
+          self.tn = None
+          return ""
+        if value.startswith("ERR"):
+            self.tn.write(bytes('close', 'ascii') + b"\r\n")
+            self.tn = None
+            return ""
+        value = value.strip("\n"+self._prompt)
+        _LOGGER.debug("Read ["+key + "] value=[" + value + "]")
+        return value
 
     def readint(self, key):
-      return int(self.read(key))
+      value = self.read(key)
+      val = int(value.split(' ', 1)[0])
+      _LOGGER.debug(" int val="+str(val))
+      return val
 
     def readfloat(self, key):
-      return float(self.read(key))
+      value = self.read(key)
+      val = round(float(value.split(' ', 1)[0]), 2)
+      _LOGGER.debug(" float val="+str(val))
+      return val
+
+    def write(self, key, val):
+      with self.mutex:
+        #_LOGGER.debug("Write " + key +" "+ val)
+        retry = 3
+        value=""
+        while retry!=0:
+          if self.tn is None:
+            self.connect()
+          if self.tn is None:
+            _LOGGER.warn("Failed to reconnect during write, cancel")
+            return 
+          #try:
+          msg = key+" "+val + "\r\n"
+          _LOGGER.debug("Write : "+msg)
+          self.tn.write(msg.encode())
+          response = self.tn.read_until(self._prompt.encode(), 1).decode()
+          #_LOGGER.debug("Read1 ["+ru.decode()+"]")
+          #response = self.read(key)
+          _LOGGER.debug("Response : ["+response+"]")
+          if response.startswith('OK'):
+            _LOGGER.debug("Success")
+            return
+          #except:
+          #  _LOGGER.warn("Failed to write, reconnect")
+          #  self.tn.close()
+          #  self.tn = None
+          _LOGGER.warn("retry")
+          retry-=1
+        if retry==0:
+          _LOGGER.warn("Failed to write, cancel")
+          if (self.tn is not None):
+            self.tn.close()
+            self.tn = None
+
+    @property
+    def id(self):
+      """Return ID of device."""
+      if (self._inventory is None):
+        self._inventory = self.read(VC_GET_INVENTORYID).split(' ', 1)[0]
+        _LOGGER.debug("Id = " + self._inventory)
+      if (self._inventory is None):
+        return None
+      return self._inventory
 
 def setup(hass, config):
     """Create the VControld component."""
@@ -124,21 +196,12 @@ def setup(hass, config):
     heating_type = conf[CONF_HEATING_TYPE]
 
     try:
-        #if heating_type == HeatingType.gas:
-        #    vicare_api = GazBoiler(conf[CONF_USERNAME], conf[CONF_PASSWORD], **params)
-        #elif heating_type == HeatingType.heatpump:
-        #    vicare_api = HeatPump(conf[CONF_USERNAME], conf[CONF_PASSWORD], **params)
-        #elif heating_type == HeatingType.fuelcell:
-        #    vicare_api = FuelCell(conf[CONF_USERNAME], conf[CONF_PASSWORD], **params)
-        #else:
-            vc_api = Device(conf[CONF_PORT])
+        vc_api = Device(conf[CONF_HOST],conf[CONF_PORT])
     except AttributeError:
         _LOGGER.error(
             "Failed to create API client."
         )
         return False
-
-    vc_api = Device(conf[CONF_PORT])
 
     hass.data[DOMAIN] = {}
     hass.data[DOMAIN][VC_API] = vc_api
@@ -151,7 +214,7 @@ def setup(hass, config):
     return True
 
 def main():
-    dev = Device(3002)
+    dev = Device('127.0.0.1',3002)
     dev.read("getTempA")
 
 if __name__ == "__main__":
