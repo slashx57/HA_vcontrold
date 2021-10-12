@@ -1,0 +1,10 @@
+{
+    "state": {
+      "default": {
+        "off": "Off",
+        "on": "On",
+        "unavailable": "Indisponible",
+        "unknown": "Inconnu"
+      }
+    }
+}

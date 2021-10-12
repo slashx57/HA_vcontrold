@@ -110,7 +110,11 @@ class Device:
             _LOGGER.warn("Failed to reconnect during read, cancel")
             return ""
           try:
-            #ru = self.tn.read_until(self._prompt.encode(), 1)
+            ru = self.tn.read_until(self._prompt.encode(), 1)
+            if ru == "":
+              self.tn.write(b"\r\n")
+              ru = self.tn.read_until(self._prompt.encode(), 1)
+
             #_LOGGER.debug("Read1 ["+ru.decode()+"]")
             self.tn.write(key.encode() + b"\r\n")
             value=self.tn.read_until(self._prompt.encode(), 1).decode().strip("\n"+self._prompt)
